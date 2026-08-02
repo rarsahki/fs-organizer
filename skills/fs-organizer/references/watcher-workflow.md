@@ -195,7 +195,7 @@ forms of the name.
 ## Steps 8–9 — Update the index, report
 
 ```
-python scripts/index_manager.py update <index-file> --file <current-path> --scope <watched-dir> [--folder <name>] && \
+python scripts/index_manager.py update <index-file> --file <current-path> --scope <watched-dir> [--folder <name>] [--previous <path-before-this-run>] && \
 python scripts/index_manager.py set-purpose <index-file> --folder <name> --purpose "<1-2 sentences>" && \
 python scripts/usage_reporter.py --since <run-start> --cwd <watched-dir> && \
 python scripts/session_log.py --scope <watched-dir> --mode watcher --step "9-report" --command "<...>" --output "<outcome>"
@@ -203,11 +203,20 @@ python scripts/session_log.py --scope <watched-dir> --mode watcher --step "9-rep
 
 ### Step 8 — Update the purpose index
 
-- **Script:** `index_manager.py update <index_path> --file FILE --scope SCOPE [--folder FOLDER]`
+- **Script:** `index_manager.py update <index_path> --file FILE --scope SCOPE [--folder FOLDER] [--previous REL]`
   per file — **including files that stayed loose**, so later arrivals can
   find them as clustering partners. For a folder created at Step 7, also
   `index_manager.py set-purpose <index_path> --folder FOLDER --purpose PURPOSE`;
   nothing else ever writes that purpose.
+- **Pass `--previous` whenever Step 7 moved or renamed a file that the
+  index already knew about**, giving its path relative to the scope as it
+  was BEFORE this run. `--file` is the post-move path, and the old entry
+  cannot be found from that: `loose_files` holds bare names, and usually
+  both the name and the folder changed. Organize mode gets away without it
+  because Step 8 there rebuilds the whole index from disk; Watcher mode
+  never rebuilds, so a file filed away without `--previous` leaves its old
+  name in `loose_files` permanently, and later arrivals are clustered
+  against a file that is no longer there.
 - **Input:** each file's final location after Step 7.
 - **Output:** the index, current with what's on disk. Always runs,
   whatever Step 7 did. If the run placed a **directory**, use
