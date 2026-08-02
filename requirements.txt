@@ -1,0 +1,21 @@
+# fs-organizer has NO required dependencies. Python 3.9+ and the standard
+# library are enough, and nothing here is installed automatically.
+#
+# Deletion does not appear below on purpose. Files are recycled through the
+# Windows shell (SHFileOperationW via ctypes), so de-duplication works on a
+# clean install. send2trash is used in preference when it happens to be
+# present, but it is not needed.
+#
+# Everything below only improves the NAMES the skill proposes, by letting it
+# read a file's contents instead of judging it from its filename and folder.
+# Each has a metadata-only fallback, and a run reports which files were named
+# without being read, so skipping these degrades quality, never correctness.
+#
+#     pip install -r requirements.txt
+#
+# or pick only what you need:
+
+pypdf>=4.0.0          # read PDF text -> name invoices/statements from content
+python-docx>=1.1.0    # read DOCX text -> name Word documents from content
+Pillow>=10.0.0        # read EXIF -> date photos by when they were taken
+send2trash>=1.8.0     # alternative Recycle Bin route; the native one is used otherwise

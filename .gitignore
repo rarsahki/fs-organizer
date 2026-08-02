@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime state, never part of the repo: per-scope indexes, session logs,
+# executor journals, and the watcher's queue all live in ~/.fs-organizer/
+.fs-organizer/
+
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

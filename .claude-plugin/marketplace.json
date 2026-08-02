@@ -1,0 +1,24 @@
+{
+  "name": "arksr-tools",
+  "owner": {
+    "name": "arksr",
+    "url": "https://github.com/REPLACE-ME"
+  },
+  "description": "Claude Code plugins by arksr.",
+  "plugins": [
+    {
+      "name": "fs-organizer",
+      "source": "./",
+      "description": "Windows-only. Organizes, renames, and de-duplicates files using content understanding plus deterministic scripts. Only byte-identical copies are ever deleted, and only to the Recycle Bin.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": [
+        "files",
+        "organization",
+        "rename",
+        "deduplicate",
+        "windows"
+      ]
+    }
+  ]
+}
