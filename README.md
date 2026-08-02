@@ -178,13 +178,23 @@ Nothing is written into the folder being organized.
 python tests\test_windows_edges.py
 powershell -ExecutionPolicy Bypass -File tests\test_watcher_queue.ps1
 powershell -ExecutionPolicy Bypass -File tests\test_watcher_resolve.ps1
+powershell -ExecutionPolicy Bypass -File tests\test_watcher_live.ps1   # ~90s
 ```
 
 No test framework needed. Each check corresponds to a real defect — junction
 traversal, 0-byte Store stubs shadowing Python, PowerShell 5.1 dropping queue
-entries, MAX_PATH, case-only renames, combining marks, locked files — so they
-exist to keep those from returning. The deletion tests really do recycle their
-temp files, since mocking the Recycle Bin would prove nothing.
+entries, MAX_PATH, case-only renames, combining marks, locked files, scopes
+sharing state because they shared a leaf name — so they exist to keep those
+from returning.
+
+Two of them are deliberately not mocked, because mocking would have hidden the
+bug they exist for. The deletion tests really recycle their temp files, since
+faking the Recycle Bin proves nothing about recoverability. And
+`test_watcher_live.ps1` starts a real watcher process and waits out real
+debounce windows — which is the only reason the self-move re-dispatch was
+found: the watcher moved a file into a subfolder, saw its own move as an
+arrival, and started a second session over finished work. Every unit-level
+test of that guard passed.
 
 ## License
 

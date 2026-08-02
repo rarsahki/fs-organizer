@@ -849,6 +849,31 @@ try {
             # itself can never list the same path twice regardless of how a
             # duplicate might have slipped into the queue file.
             $paths = @($batch | ForEach-Object { $_.path } | Where-Object { Test-Path $_ } | Select-Object -Unique)
+
+            # Ask the index again, HERE, about every path in the batch.
+            #
+            # Enqueue-File asks the same question, but it asks the instant the
+            # event fires - and a run moves a file first and updates the index
+            # afterwards, so at that moment the index legitimately does not
+            # know the file yet. Every file the watcher filed away therefore
+            # queued itself straight back and earned a second headless session
+            # over work already finished: the nested-watcher cascade, rebuilt
+            # inside a single scope.
+            #
+            # By now that is no longer true. The dispatch below blocks the
+            # loop until the session exits, so any events it caused piled up
+            # in the queue while the index was being written, and this drain
+            # is the first moment the index can answer accurately.
+            $paths = @($paths | Where-Object {
+                $rel = $_
+                if ($_.StartsWith($WatchDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    $rel = $_.Substring($WatchDir.Length).TrimStart('\', '/')
+                }
+                if (Test-AlreadyIndexed -RelPath $rel) {
+                    Write-Log "SKIP (indexed since it was queued - this run's own move): $_"
+                    $false
+                } else { $true }
+            })
             if ($paths.Count -eq 0) { continue }
 
             $pathList = ($paths | ForEach-Object { "`"$_`"" }) -join ', '
