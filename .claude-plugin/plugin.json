@@ -3,7 +3,7 @@
   "description": "Windows-only. Analyzes, renames, de-duplicates, and reorganizes files using content understanding plus deterministic scripts. Deletes only byte-identical copies, and only to the Recycle Bin.",
   "version": "0.1.0",
   "author": {
-    "name": "arksr",
+    "name": "rarsahki",
     "url": "https://github.com/rarsahki"
   },
   "homepage": "https://github.com/rarsahki/fs-organizer",

@@ -46,7 +46,7 @@ plainly before you install it.
 
 ```
 /plugin marketplace add rarsahki/fs-organizer
-/plugin install fs-organizer@arksr-tools
+/plugin install fs-organizer@fs-organizer-tool
 ```
 
 Then just ask:

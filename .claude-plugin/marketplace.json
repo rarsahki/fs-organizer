@@ -1,10 +1,10 @@
 {
-  "name": "arksr-tools",
+  "name": "fs-organizer-tool",
   "owner": {
-    "name": "arksr",
+    "name": "rarsahki",
     "url": "https://github.com/rarsahki"
   },
-  "description": "Claude Code plugins by arksr.",
+  "description": "Claude Code plugins by rarsahki.",
   "plugins": [
     {
       "name": "fs-organizer",
