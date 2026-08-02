@@ -182,7 +182,7 @@ def build_index(scope: str | Path, output_path: str | Path | None = None) -> dic
     existing_purposes: dict[str, str] = {}
     if output_path and Path(output_path).exists():
         try:
-            old = json.loads(Path(output_path).read_text(encoding="utf-8"))
+            old = json.loads(Path(output_path).read_text(encoding="utf-8-sig"))
             existing_purposes = {name: meta.get("purpose")
                                   for name, meta in old.get("folders", {}).items()
                                   if meta.get("purpose")}
@@ -234,7 +234,7 @@ def build_index(scope: str | Path, output_path: str | Path | None = None) -> dic
 
 
 def load_index(path: str | Path) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def _verify_and_repair_hash_bucket(index: dict, scope: Path, sha: str) -> list[str]:

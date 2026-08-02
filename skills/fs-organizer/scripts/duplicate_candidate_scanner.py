@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.from_:
-        data = json.loads(Path(args.from_).read_text(encoding="utf-8"))
+        data = json.loads(Path(args.from_).read_text(encoding="utf-8-sig"))
         result = scan_all(data["fingerprints"])
     elif args.folder:
         result = scan_folder(args.folder)

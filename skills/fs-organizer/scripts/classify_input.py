@@ -61,7 +61,7 @@ def build(fingerprints: list[dict], drop: set[str] | None = None) -> dict:
 
 def _duplicate_paths(duplicates_path: str | Path) -> set[str]:
     """Every path Step 3 marked for deletion in an exact-duplicate group."""
-    data = json.loads(Path(duplicates_path).read_text(encoding="utf-8"))
+    data = json.loads(Path(duplicates_path).read_text(encoding="utf-8-sig"))
     return {p for g in data.get("exact_groups", []) for p in g.get("delete", [])}
 
 
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                          "the index lookup resolved)")
     args = ap.parse_args(argv)
 
-    raw = json.loads(Path(args.fingerprints).read_text(encoding="utf-8"))
+    raw = json.loads(Path(args.fingerprints).read_text(encoding="utf-8-sig"))
     fingerprints = raw["fingerprints"] if isinstance(raw, dict) else (
         raw if isinstance(raw, list) else [raw])
 

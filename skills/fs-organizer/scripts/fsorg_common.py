@@ -75,7 +75,7 @@ def _legacy_belongs_to(legacy: Path, path: str | Path) -> bool:
     if not index.is_file():
         return True  # no claim recorded, so nothing contradicts this scope
     try:
-        recorded = json.loads(index.read_text(encoding="utf-8")).get("scope")
+        recorded = json.loads(index.read_text(encoding="utf-8-sig")).get("scope")
     except (json.JSONDecodeError, OSError):
         return True
     if not recorded:

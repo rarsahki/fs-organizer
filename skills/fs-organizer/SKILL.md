@@ -8,7 +8,7 @@ description: >
   folders, or directories, checking names against a naming convention, or
   asks "what should this file be called" — even if they don't explicitly
   name the skill. Accepts a single file, multiple files, or a directory.
-allowed-tools: Bash(python:*), Bash(python3:*), Read, Glob, Agent
+allowed-tools: Bash(python:*), Bash(python3:*), PowerShell, Bash(powershell:*), Read, Glob, Agent
 ---
 
 # fs-organizer
@@ -205,11 +205,44 @@ template (Script/Reference, Input, Output); they differ in how each step
 is carried out for their mode.
 
 Everything executable lives in `scripts/` — the Python the steps call, and
-the two files that make Watcher mode possible:
-`fs-organizer-watch.ps1` (the resident OS-level watcher) and
-`fs-organizer-watch-launcher.vbs` (the hidden launcher a Task Scheduler
-"at logon" entry points at). Neither is invoked by the workflow itself;
-the watcher is what *starts* a Watcher-mode run.
+the files that make Watcher mode possible: `fs-organizer-watch.ps1` (the
+resident OS-level watcher), `fs-organizer-watch-launcher.vbs` (a hidden
+launcher for running it from a checkout), and
+`fs-organizer-watch-setup.ps1` (turns the watch on for a folder). The
+watcher is not invoked by the workflow — it is what *starts* a
+Watcher-mode run.
+
+## Offering the watcher (Organize mode only)
+
+At the end of a successful Organize-mode run, when all of these hold:
+
+- the run was interactive (never in Watcher mode),
+- the scope now has an index — which it does after any completed run, and
+  which the watcher requires before it will dispatch anything,
+- and the scope is not already watched, per
+  `python scripts/watch_registry.py check --root <scope>` returning no
+  `already` and no `covered_by`,
+
+then tell the user the folder can be kept organized automatically as files
+land, and ask. Ask once; if they decline, do not raise it again in the same
+session. On yes:
+
+```
+powershell -ExecutionPolicy Bypass -File scripts/fs-organizer-watch-setup.ps1 -WatchDir "<scope>"
+```
+
+Report back what it printed — where it will log, and how to stop it.
+
+The setup script owns every decision here, so do not reimplement any of
+it: it refuses a folder already covered by an outer watch, absorbs any
+watch nested inside this one (carrying that scope's folder purposes into
+this one's index), installs its launcher at a fixed path so a plugin
+update cannot break it, and starts it from HKCU's Run key so no
+Administrator prompt is ever needed. If it exits non-zero, relay its
+message rather than retrying or working around it — a refusal is the
+script preventing two watchers from dispatching twice over one file.
+
+Never run it unasked, and never in Watcher mode.
 
 ## Guardrails
 

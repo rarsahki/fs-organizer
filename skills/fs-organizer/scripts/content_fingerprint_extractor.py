@@ -309,7 +309,7 @@ def _missing_parser_hint(results: list[dict]) -> str | None:
 
 def _files_from_context(context_path: str | Path) -> list[str]:
     """Expand a context.json's folder batches into a flat file list."""
-    ctx = json.loads(Path(context_path).read_text(encoding="utf-8"))
+    ctx = json.loads(Path(context_path).read_text(encoding="utf-8-sig"))
     files = []
     for batch in ctx["batches"]:
         folder = Path(batch["folder"])

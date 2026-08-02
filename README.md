@@ -115,43 +115,49 @@ A resident watcher can organize files as they land, without you asking. It is
 step, and the folder must already have been organized once interactively so an
 index exists.
 
-Register it with the setup script, which finds the installed plugin, installs
-a small launcher at a fixed path, and creates the scheduled task:
+**The easiest way is to say yes when asked.** After organizing a folder, the
+skill offers to keep watching it — that ordering is not arbitrary, since the
+watcher only dispatches for a folder that already has an index.
+
+To set it up by hand, from a clone of this repo:
 
 ```
-powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\.claude\plugins\cache\fs-organizer-tool\fs-organizer\0.1.0\skills\fs-organizer\scripts\fs-organizer-watch-setup.ps1"
+powershell -ExecutionPolicy Bypass -File skills\fs-organizer\scripts\fs-organizer-watch-setup.ps1 -WatchDir "D:\Scans"
 ```
 
-Or, from a clone of this repo:
+`-Uninstall` stops watching a folder; `-Force` skips the absorb prompt.
+
+**No Administrator prompt.** It starts from HKCU's `Run` key rather than a
+scheduled task, because `schtasks /sc onlogon` fails with "Access is denied"
+for a normal user, and an optional convenience should not require elevation.
+
+**Nested watches are not allowed.** Watching `Downloads` and
+`Downloads\Receipts` separately runs *two* headless sessions over one file:
+the first files a download into Receipts, the second reads that as an arrival
+and repeats the work. So watching a folder absorbs any watch already
+registered inside it — carrying that folder's purposes into the outer index —
+and watching a folder already covered by an outer watch is refused with an
+explanation.
+
+**Plugin updates don't break it.** Plugins install under a version-stamped
+directory (`...\fs-organizer\0.1.0\...`) that Claude Code reclaims once
+superseded, so autostart pointing straight at it would work until the first
+update and then stop silently. Setup installs a launcher at `~/.fs-organizer/`
+that resolves the current version at every launch.
+
+Start it without logging out:
 
 ```
-powershell -ExecutionPolicy Bypass -File skills\fs-organizer\scripts\fs-organizer-watch-setup.ps1
-```
-
-Options: `-WatchDir "D:\Scans"` to watch something other than Downloads,
-`-TaskName` to rename the task, `-Uninstall` to remove it.
-
-Don't register a task against the plugin path directly. Plugins install under
-a **version-stamped** directory (`...\fs-organizer\0.1.0\...`) that Claude Code
-reclaims once superseded, so such a task works until the first plugin update
-and then stops without saying so. The setup script installs a launcher at
-`~/.fs-organizer/` that resolves the current version at every launch, so
-updating the plugin needs no re-registration.
-
-Start it without logging out, once registered:
-
-```
-schtasks /run /tn "fs-organizer watch"
+wscript.exe "%USERPROFILE%\.fs-organizer\fs-organizer-watch-stable-launcher.vbs" "%USERPROFILE%\Downloads"
 ```
 
 The watcher resolves `python.exe` and `claude.exe` at startup and refuses to
 run if it cannot find real ones, rather than accepting files forever and
-dispatching nothing. If your Python is installed somewhere unusual, set
-`FSORG_PYTHON` (and `FSORG_CLAUDE`) to override. `FSORG_WATCHER` points the
-launcher at a checkout instead of the installed plugin.
+dispatching nothing. `FSORG_PYTHON`, `FSORG_CLAUDE` and `FSORG_WATCHER`
+override that search.
 
-Logs: `~/.fs-organizer/logs/watcher-<scope>.log` for the watcher itself, and
-`watch-resolve.log` for which version the launcher picked.
+Logs: `~/.fs-organizer/logs/watcher-<scope>.log`, plus `watch-resolve.log`
+for which version the launcher picked.
 
 ## Where state lives
 

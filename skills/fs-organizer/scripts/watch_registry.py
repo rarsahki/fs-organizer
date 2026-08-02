@@ -54,7 +54,7 @@ def load(registry_path: str | Path | None = None) -> list[dict]:
     if not p.is_file():
         return []
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return []
     return [e for e in data.get("watched", []) if e.get("root")]

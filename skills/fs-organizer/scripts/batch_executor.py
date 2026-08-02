@@ -340,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="directory the approval covered; ops outside it are rejected")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
-    ops = json.loads(Path(args.plan_json).read_text(encoding="utf-8"))
+    ops = json.loads(Path(args.plan_json).read_text(encoding="utf-8-sig"))
     result = execute_plan(ops, dry_run=args.dry_run, scope=args.scope)
     print(json.dumps(result, indent=2))
     return 0 if result["failed"] == 0 else 1
