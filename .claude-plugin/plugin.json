@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "author": {
     "name": "arksr",
-    "url": "https://github.com/REPLACE-ME"
+    "url": "https://github.com/rarsahki"
   },
-  "homepage": "https://github.com/REPLACE-ME/fs-organizer",
-  "repository": "https://github.com/REPLACE-ME/fs-organizer",
+  "homepage": "https://github.com/rarsahki/fs-organizer",
+  "repository": "https://github.com/rarsahki/fs-organizer",
   "license": "MIT",
   "keywords": [
     "files",
