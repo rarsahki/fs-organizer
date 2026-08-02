@@ -7,10 +7,81 @@ consistent.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import unicodedata
 from pathlib import Path
+
+STATE_ROOT = Path.home() / ".fs-organizer"
+
+# Kept in sync with Get-ScopeId in fs-organizer-watch.ps1 (see scope_id).
+_ASCII_UPPER_RE = re.compile(r"[A-Z]")
+
+
+def scope_id(path: str | Path) -> str:
+    """Stable, collision-free identity for a scope directory.
+
+    The leaf name alone is not an identity. `C:\\Users\\me\\Downloads\\Receipts`
+    and `D:\\Scans\\Receipts` are different folders, and naming their state
+    after the leaf silently gave them one shared index, one queue, and one
+    lock - each folder quietly organizing against the other's record of the
+    world.
+
+    The leaf is kept because it is what makes a state folder recognizable at
+    a glance, and a short digest of the full path is appended to make it
+    unique.
+
+    Only ASCII A-Z is lowered before hashing, rather than str.casefold().
+    The watcher computes this same id in PowerShell, and the two must agree
+    exactly or a scope gets two state folders; full Unicode case folding
+    differs between the languages on characters like the German sharp s and
+    the Turkish dotted I, while an ASCII-only rule is identical in both and
+    still covers how Windows actually compares paths.
+    """
+    resolved = Path(path).resolve()
+    normalized = _ASCII_UPPER_RE.sub(lambda m: m.group().lower(), str(resolved))
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8]
+    return f"{resolved.name}-{digest}"
+
+
+def _legacy_state_dir(path: str | Path) -> Path:
+    """Where this scope's state lived before scope_id existed."""
+    return STATE_ROOT / Path(str(path).rstrip("\\/")).name
+
+
+def scope_state_dir(path: str | Path, create: bool = True) -> Path:
+    """This scope's state folder, migrating any pre-scope_id state into it.
+
+    Migration only happens when the legacy folder can be proven to belong to
+    this scope - its index records the same root, or it holds no index at
+    all. A legacy folder whose index names a different root is left exactly
+    where it is: it is the other folder's state, and the collision this
+    function exists to fix is precisely what would make moving it wrong.
+    """
+    target = STATE_ROOT / scope_id(path)
+    if not target.exists():
+        legacy = _legacy_state_dir(path)
+        if legacy.is_dir() and legacy != target and _legacy_belongs_to(legacy, path):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(legacy, target)
+    if create:
+        target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _legacy_belongs_to(legacy: Path, path: str | Path) -> bool:
+    index = legacy / "index.json"
+    if not index.is_file():
+        return True  # no claim recorded, so nothing contradicts this scope
+    try:
+        recorded = json.loads(index.read_text(encoding="utf-8")).get("scope")
+    except (json.JSONDecodeError, OSError):
+        return True
+    if not recorded:
+        return True
+    return Path(recorded).resolve() == Path(path).resolve()
+
 
 # Files/dirs the organizer must never rename, move, or propose changes for.
 EXCLUDED_FILES = {"desktop.ini", "thumbs.db", ".ds_store"}

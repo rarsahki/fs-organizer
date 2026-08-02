@@ -115,20 +115,43 @@ A resident watcher can organize files as they land, without you asking. It is
 step, and the folder must already have been organized once interactively so an
 index exists.
 
-Register it to start at logon:
+Register it with the setup script, which finds the installed plugin, installs
+a small launcher at a fixed path, and creates the scheduled task:
 
 ```
-schtasks /create /tn "fs-organizer watch" /sc onlogon ^
-  /tr "wscript.exe \"%USERPROFILE%\.claude\plugins\fs-organizer\skills\fs-organizer\scripts\fs-organizer-watch-launcher.vbs\""
+powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\.claude\plugins\cache\fs-organizer-tool\fs-organizer\0.1.0\skills\fs-organizer\scripts\fs-organizer-watch-setup.ps1"
 ```
 
-Watch a different folder by passing `-WatchDir`. The watcher resolves
-`python.exe` and `claude.exe` at startup and refuses to run if it cannot find
-real ones, rather than accepting files forever and dispatching nothing. If
-your Python is installed somewhere unusual, set `FSORG_PYTHON` (and
-`FSORG_CLAUDE`) to override.
+Or, from a clone of this repo:
 
-Its log is at `~/.fs-organizer/logs/watcher-<scope>.log`.
+```
+powershell -ExecutionPolicy Bypass -File skills\fs-organizer\scripts\fs-organizer-watch-setup.ps1
+```
+
+Options: `-WatchDir "D:\Scans"` to watch something other than Downloads,
+`-TaskName` to rename the task, `-Uninstall` to remove it.
+
+Don't register a task against the plugin path directly. Plugins install under
+a **version-stamped** directory (`...\fs-organizer\0.1.0\...`) that Claude Code
+reclaims once superseded, so such a task works until the first plugin update
+and then stops without saying so. The setup script installs a launcher at
+`~/.fs-organizer/` that resolves the current version at every launch, so
+updating the plugin needs no re-registration.
+
+Start it without logging out, once registered:
+
+```
+schtasks /run /tn "fs-organizer watch"
+```
+
+The watcher resolves `python.exe` and `claude.exe` at startup and refuses to
+run if it cannot find real ones, rather than accepting files forever and
+dispatching nothing. If your Python is installed somewhere unusual, set
+`FSORG_PYTHON` (and `FSORG_CLAUDE`) to override. `FSORG_WATCHER` points the
+launcher at a checkout instead of the installed plugin.
+
+Logs: `~/.fs-organizer/logs/watcher-<scope>.log` for the watcher itself, and
+`watch-resolve.log` for which version the launcher picked.
 
 ## Where state lives
 
@@ -148,6 +171,7 @@ Nothing is written into the folder being organized.
 ```
 python tests\test_windows_edges.py
 powershell -ExecutionPolicy Bypass -File tests\test_watcher_queue.ps1
+powershell -ExecutionPolicy Bypass -File tests\test_watcher_resolve.ps1
 ```
 
 No test framework needed. Each check corresponds to a real defect — junction

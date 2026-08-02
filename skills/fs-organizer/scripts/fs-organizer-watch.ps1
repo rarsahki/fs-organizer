@@ -67,18 +67,64 @@
 #>
 
 param(
-    # Folder to watch. The folder's leaf name becomes the scope name, which
-    # is what its state folder under .fs-organizer is called.
+    # Folder to watch. Its state lives under .fs-organizer\<scope-id>\.
     [string]$WatchDir = (Join-Path $env:USERPROFILE 'Downloads')
 )
 
 $ErrorActionPreference = 'Stop'
 
+function Get-ScopeId {
+    <#
+        Stable, collision-free identity for a scope directory.
+
+        MUST match fsorg_common.scope_id in Python exactly, or the watcher
+        and the scripts it calls would read and write two different state
+        folders for the same watched directory. Only ASCII A-Z is lowered,
+        for the same reason: full Unicode case folding differs between
+        PowerShell and Python on characters like the German sharp s.
+
+        The leaf name alone is not an identity - C:\Users\me\Downloads\Receipts
+        and D:\Scans\Receipts would share one index, one queue and one lock -
+        so a short digest of the whole path is appended to it.
+    #>
+    param([string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path.TrimEnd('\', '/'))
+    $normalized = [regex]::Replace($full, '[A-Z]', { param($m) $m.Value.ToLowerInvariant() })
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
+    } finally {
+        $sha.Dispose()
+    }
+    $hex = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+
+    # The leaf's real on-disk casing, not whatever casing the caller typed.
+    # Python's Path.resolve() normalizes it and GetFullPath does not, so
+    # "-WatchDir C:\Users\me\DOWNLOADS" would otherwise produce the id
+    # "DOWNLOADS-2435..." here and "Downloads-2435..." in Python. NTFS treats
+    # those as one folder, which is exactly what makes the mismatch easy to
+    # miss until something compares the two ids as strings.
+    # DirectoryInfo.Name just echoes the path string back, so the parent has
+    # to be enumerated to learn the entry's real spelling - the same reason
+    # batch_executor._ondisk_name scans a directory instead of trusting a
+    # path. When the folder does not exist yet, both languages fall back to
+    # the typed casing, so they still agree.
+    $leaf = Split-Path $full -Leaf
+    $parent = Split-Path $full -Parent
+    if ($parent) {
+        $entry = Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -eq $leaf } | Select-Object -First 1
+        if ($entry) { $leaf = $entry.Name }
+    }
+
+    return '{0}-{1}' -f $leaf, $hex.Substring(0, 8)
+}
+
 $WatchDir           = [System.IO.Path]::GetFullPath($WatchDir.TrimEnd('\', '/'))
-$ScopeName          = Split-Path $WatchDir -Leaf
+$ScopeName          = Get-ScopeId $WatchDir
 $StateDir           = Join-Path $env:USERPROFILE '.fs-organizer'
 # Per-scope state: everything for the watched scope (its purpose index, its
-# runs, its queue) lives under .fs-organizer\<scope-name>\. Keeping the
+# runs, its queue) lives under .fs-organizer\<scope-id>\. Keeping the
 # queue and lock per-scope as well means two watchers on different folders
 # never drain each other's queue or block on each other's lock.
 $ScopeStateDir      = Join-Path $StateDir $ScopeName
@@ -329,7 +375,7 @@ function Invoke-ClaudeHeadless {
         [string]$OutputFormat,
         [string]$WorkingDirectory
     )
-    # $script:ClaudeExe is a resolved full path, not a bare name — see
+    # $script:ClaudeExe is a resolved full path, not a bare name - see
     # Resolve-Executable for why PATH alone cannot be trusted here.
     return Invoke-HiddenProcess -FileName $script:ClaudeExe -ArgumentList @(
         '-p', $Prompt, '--model', $Model, '--allowedTools', $AllowedTools, '--output-format', $OutputFormat
@@ -388,7 +434,7 @@ function Read-JsonArray {
        `@(Get-Content ... | ConvertFrom-Json)` returns a one-element array
        wrapping the real one. Adding to that produced a nested queue from
        the third file onward, which broke dedupe and left the dispatcher
-       able to see only the last entry — every other file that arrived in
+       able to see only the last entry - every other file that arrived in
        the same debounce window was silently dropped. Assigning the result
        first and wrapping the VARIABLE is what unrolls correctly. #>
     param([string]$Path)
@@ -401,11 +447,11 @@ function Read-JsonArray {
     }
     if ($null -eq $parsed) { return ,@() }
     # An explicit flag, not a count comparison: @($parsed) is 1 for ANY
-    # multi-element array here — that is the very quirk being worked around
-    # — so comparing counts reported a recovery on every ordinary read.
+    # multi-element array here - that is the very quirk being worked around
+    # - so comparing counts reported a recovery on every ordinary read.
     $script:QueueWasRepaired = $false
     # Assign, THEN wrap. `@(Expand-NestedQueue ...)` would wrap the array
-    # this function hands back into a new one-element array — the same
+    # this function hands back into a new one-element array - the same
     # mistake, one level up, that corrupted the queue in the first place.
     $expanded = Expand-NestedQueue -Node $parsed
     $flat = @($expanded)
@@ -442,31 +488,46 @@ function Release-QueueLock {
 }
 
 function Test-AlreadyIndexed {
-    # Self-trigger guard: if this exact top-level filename is already
-    # listed in index.json's loose_files, it's something the watcher (or a
-    # manual organize run) already knows about - most likely a rename echo
-    # of the watcher's own execute step (e.g. a top-level-only rename like
-    # form-135.doc -> form-135-v01.doc, which the index update immediately reflects in
-    # loose_files), not a genuinely new download. Fails OPEN (treats as
-    # "not indexed", i.e. proceeds) on any read error, so a corrupt/mid-
-    # write index never silently swallows a real new file.
+    # Self-trigger guard: is this path something the index already accounts
+    # for - the watcher's own move or rename echoing back - rather than a
+    # genuinely new arrival?
     #
-    # index.json's schema is {by_sha256, folders, loose_files} - there is
-    # no flat per-file map, so loose_files (a plain name array) is the only
-    # membership check relevant to this TOP-LEVEL-only watcher; a file
-    # that's already inside a folder isn't at the top level anymore and
-    # wouldn't fire this watcher's events again regardless.
+    # This became load-bearing when the watcher started covering the whole
+    # tree. Every file the skill files into a subfolder now raises an
+    # arrival event from its new location, and without this check each one
+    # would start another headless session over work just completed: the
+    # nested-watcher cascade, reproduced inside a single scope.
+    #
+    # All three parts of the index are consulted, since a file can be
+    # accounted for in any of them:
+    #   by_sha256   - paths relative to the scope root, which is where a
+    #                 filed-away file is recorded
+    #   loose_files - bare names of files still at the scope root
+    #   folders     - relative folder paths, catching a folder's own rename
+    #
+    # Fails OPEN on any read error: a corrupt or half-written index must
+    # never silently swallow a real new file.
     param([string]$RelPath)
     if (-not (Test-Path $IndexFile)) { return $false }
     try {
         $idx = Get-Content $IndexFile -Raw | ConvertFrom-Json
-        $normalized = $RelPath -replace '\\', '/'
-        if (@($idx.loose_files) -contains $normalized) { return $true }
-        # Folders: a top-level directory already registered in the index's
-        # folders map is the watcher's own doing (or a prior organize run),
-        # not a new arrival - e.g. the rename echo when a folder gets a
-        # convention name.
-        if ($idx.folders -and $idx.folders.PSObject.Properties.Name -contains $normalized) { return $true }
+        $normalized = ($RelPath -replace '\\', '/').TrimStart('/')
+        $leaf = Split-Path $normalized -Leaf
+
+        if (@($idx.loose_files) -contains $leaf -and $normalized -eq $leaf) { return $true }
+
+        if ($idx.folders) {
+            if (@($idx.folders.PSObject.Properties.Name) -contains $normalized) { return $true }
+        }
+
+        if ($idx.by_sha256) {
+            foreach ($property in $idx.by_sha256.PSObject.Properties) {
+                # ConvertFrom-Json hands back the value as one object rather
+                # than enumerating it (the 5.1 quirk Read-JsonArray exists
+                # for), so wrap before comparing.
+                if (@($property.Value) -contains $normalized) { return $true }
+            }
+        }
         return $false
     } catch {
         return $false
@@ -531,7 +592,14 @@ function Enqueue-File {
         }
     }
 
-    $relPath = [System.IO.Path]::GetFileName($Path)  # top-level-only watch, so filename IS the relative path
+    # Relative to the scope root, not just the filename: the watch covers the
+    # whole tree now, so "receipts/invoice-2024-01-31.pdf" is what the index
+    # records and what the guard has to be asked about.
+    $relPath = $Path
+    if ($Path.StartsWith($WatchDir, [StringComparison]::OrdinalIgnoreCase)) {
+        $relPath = $Path.Substring($WatchDir.Length).TrimStart('\', '/')
+    }
+    if (-not $relPath) { $relPath = [System.IO.Path]::GetFileName($Path) }
     if (Test-AlreadyIndexed -RelPath $relPath) {
         Write-Log "SKIP (already indexed - watcher's own move/rename, not a new arrival): $Path"
         return
@@ -631,7 +699,19 @@ function Register-Watchers {
     # buffer. The 8 KB default overflows on any bulk arrival - extracting an
     # archive into the watched folder is enough.
     $script:fsw = New-Object System.IO.FileSystemWatcher $WatchDir
-    $script:fsw.IncludeSubdirectories = $false
+    # The whole tree, not just the top level. One watcher now covers a scope
+    # and everything nested inside it, because two watchers on nested folders
+    # dispatch twice for the same file: the outer session moves a download
+    # into a subfolder, the inner watcher sees an arrival, and a second
+    # headless session runs over work that is already done. Since the outer
+    # watch absorbs any nested one (see watch_registry.py), it has to see
+    # arrivals in subfolders too - a file dropped straight into a subfolder
+    # would otherwise be noticed by nobody.
+    #
+    # This makes Test-AlreadyIndexed load-bearing rather than a nicety: the
+    # skill's own moves into subfolders now raise events here, and it is what
+    # tells them apart from genuine arrivals.
+    $script:fsw.IncludeSubdirectories = $true
     $script:fsw.InternalBufferSize = 65536
     $script:fsw.NotifyFilter = [System.IO.NotifyFilters]::FileName -bor [System.IO.NotifyFilters]::DirectoryName
     $script:fsw.EnableRaisingEvents = $true

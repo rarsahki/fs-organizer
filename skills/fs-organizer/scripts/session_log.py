@@ -30,16 +30,19 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATE_ROOT = Path.home() / ".fs-organizer"
+from fsorg_common import STATE_ROOT, scope_state_dir  # noqa: F401
 
 
 def log_path(scope: str | Path, when: datetime | None = None) -> Path:
-    """Where this scope's log for *when*'s date lives (created if needed)."""
+    """Where this scope's log for *when*'s date lives (created if needed).
+
+    Uses scope_state_dir rather than a folder named after the scope's leaf:
+    two unrelated directories sharing a leaf name would otherwise append to
+    one another's log, interleaving runs that have nothing to do with each
+    other.
+    """
     when = when or datetime.now(timezone.utc)
-    scope_name = Path(str(scope).rstrip("\\/")).name
-    d = STATE_ROOT / scope_name
-    d.mkdir(parents=True, exist_ok=True)
-    return d / f"session-file-{when:%Y-%m-%d}"
+    return scope_state_dir(scope) / f"session-file-{when:%Y-%m-%d}"
 
 
 def append_entry(scope: str | Path, mode: str, step: str,

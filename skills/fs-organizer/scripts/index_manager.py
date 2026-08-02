@@ -435,9 +435,61 @@ def rehash_file(index_path: str | Path, rel_path: str, scope: str | Path) -> dic
     return index
 
 
+def merge_scope(parent_index_path: str | Path, parent_root: str | Path,
+                child_index_path: str | Path, child_root: str | Path) -> dict:
+    """Absorb a nested scope's folder purposes into its parent's index.
+
+    Called when a folder is put under watch and a folder inside it was
+    already watched separately. The two must not stay separate - nested
+    watchers dispatch twice for the same file - but the child's purposes are
+    LLM-authored judgments that a plain rebuild of the parent would silently
+    discard, and re-deriving them means reading all that content again.
+
+    So each purpose is re-keyed to its path relative to the PARENT root and
+    carried across. Hashes and loose files are deliberately NOT merged: the
+    parent's own `build` re-derives those from disk, correctly and cheaply,
+    whereas merging them would mean rewriting every relative path and hoping
+    nothing moved in between. A purpose the parent already holds wins, since
+    the parent is the scope that survives.
+    """
+    parent_root = Path(parent_root).resolve()
+    child_root = Path(child_root).resolve()
+    prefix = child_root.relative_to(parent_root).as_posix()
+
+    child = load_index(child_index_path)
+    carried: list[str] = []
+    kept_existing: list[str] = []
+
+    def _mutate(index):
+        folders = index.setdefault("folders", {})
+        for name, meta in child.get("folders", {}).items():
+            purpose = meta.get("purpose")
+            if not purpose:
+                continue
+            merged = prefix if name == "." else f"{prefix}/{name}"
+            if folders.get(merged, {}).get("purpose"):
+                kept_existing.append(merged)
+                continue
+            entry = folders.setdefault(merged, {"purpose": None, "member_count": 0})
+            entry["purpose"] = purpose
+            entry["member_count"] = entry.get("member_count") or meta.get("member_count", 0)
+            carried.append(merged)
+
+    _mutate_locked(parent_index_path, _mutate)
+    return {"prefix": prefix, "carried": sorted(carried),
+            "kept_existing": sorted(kept_existing)}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    ms = sub.add_parser("merge-scope",
+                        help="absorb a nested scope's purposes into its parent")
+    ms.add_argument("--parent-index", required=True)
+    ms.add_argument("--parent-root", required=True)
+    ms.add_argument("--child-index", required=True)
+    ms.add_argument("--child-root", required=True)
 
     b = sub.add_parser("build")
     b.add_argument("--scope", required=True)
@@ -468,7 +520,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
 
-    if args.cmd == "build":
+    if args.cmd == "merge-scope":
+        result = merge_scope(args.parent_index, args.parent_root,
+                             args.child_index, args.child_root)
+        print(f"Merged {args.child_root} into {args.parent_root} as "
+              f"'{result['prefix']}': carried {len(result['carried'])} purpose(s), "
+              f"kept {len(result['kept_existing'])} the parent already had")
+    elif args.cmd == "build":
         index = build_index(args.scope, args.output)
         missing = sum(1 for m in index["folders"].values() if not m.get("purpose"))
         print(f"Indexed {sum(len(p) for p in index['by_sha256'].values())} hashed files, "

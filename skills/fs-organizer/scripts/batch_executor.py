@@ -43,7 +43,7 @@ from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATE_ROOT = Path.home() / ".fs-organizer"
+from fsorg_common import STATE_ROOT, scope_state_dir
 
 
 class ScopeViolation(Exception):
@@ -60,8 +60,13 @@ class ScopeViolation(Exception):
 
 
 def _journal_dir(scope: Path | None) -> Path:
-    """Per-scope journal location, mirroring the index and session log."""
-    return STATE_ROOT / scope.name / "journals" if scope else STATE_ROOT / "journals"
+    """Per-scope journal location, mirroring the index and session log.
+
+    Keyed by scope_state_dir, so two folders sharing a leaf name do not
+    write their journals into one pile - which would make an audit of "what
+    did this run change" answer for the wrong directory.
+    """
+    return scope_state_dir(scope) / "journals" if scope else STATE_ROOT / "journals"
 
 
 def _long(p: str | Path) -> str:

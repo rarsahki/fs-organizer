@@ -10,6 +10,7 @@ Exits non-zero if anything fails.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -37,7 +38,7 @@ sys.path.insert(0, str(SCRIPTS))
 from batch_executor import execute_plan                                    # noqa: E402
 from content_fingerprint_extractor import _head_text, extract_fingerprint  # noqa: E402
 from fsorg_common import (is_excluded, is_hidden, is_reparse_point,          # noqa: E402
-                          split_name, tokenize)
+                          scope_id, split_name, tokenize)
 from index_manager import build_index, load_index, update_index           # noqa: E402
 from name_assembler import assemble, disambiguate, parse                  # noqa: E402
 from path_context_reader import read_context_tree                         # noqa: E402
@@ -263,10 +264,13 @@ def test_executor(root: Path) -> None:
     check("unknown op fails cleanly",
           run([{"op": "frobnicate", "path": str(scope / "keep.txt")}])[0], "failed")
 
-    # Journals belong to the scope, like every other piece of its state.
+    # Journals belong to the scope, like every other piece of its state, and
+    # are keyed by scope_id rather than the folder's leaf name: two unrelated
+    # directories called "Receipts" must not share one audit trail.
     journal = execute_plan([{"op": "mkdir", "path": str(scope / "probe")}], scope=scope)
-    check("journal is scoped to the run",
-          Path(journal["journal_path"]).parent.parent.name, scope.name)
+    state_dir = Path(journal["journal_path"]).parent.parent
+    check("journal is scoped to the run", state_dir.name, scope_id(scope))
+    check("journal dir still names the folder", state_dir.name.startswith(scope.name + "-"), True)
 
 
 # --------------------------------------------------------------------------
@@ -381,6 +385,119 @@ def test_index(root: Path) -> None:
           [n for n in remaining if not (scope / n).exists()], [])
 
 
+def test_scope_identity_and_nesting(root: Path) -> None:
+    """Scope identity, and the overlap rules that stop nested watchers.
+
+    Two watchers on nested folders dispatch twice for one file: the outer
+    session files a download into a subfolder, the inner watcher sees an
+    arrival, and a second headless session repeats work already done. Each
+    watcher consults only its own scope's index, so neither can tell the
+    arrival was the other's doing. Preventing that starts with scopes having
+    identities that do not collide.
+    """
+    section("scope identity and nested watches")
+
+    import fsorg_common
+    import watch_registry
+    from index_manager import merge_scope
+
+    downloads = root / "Downloads"
+    receipts = downloads / "Receipts"
+    unrelated = root / "Scans" / "Receipts"
+    for d in (downloads, receipts, unrelated):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # The leaf name alone is not an identity.
+    check("same leaf, different folders, different ids",
+          scope_id(receipts) == scope_id(unrelated), False)
+    check("id still names the folder", scope_id(receipts).startswith("Receipts-"), True)
+    check("id is case-stable", scope_id(str(downloads).upper()), scope_id(downloads))
+
+    registry = root / "watched.json"
+    watch_registry.register(receipts, registry)
+
+    overlap = watch_registry.find_overlap(downloads, registry)
+    check("watching a parent absorbs the nested watch",
+          [Path(e["root"]).name for e in overlap["absorbs"]], ["Receipts"])
+    check("parent is not itself covered", overlap["covered_by"], None)
+
+    watch_registry.register(downloads, registry)
+    covered = watch_registry.find_overlap(receipts, registry)["covered_by"]
+    check("a watched parent covers its child",
+          Path(covered["root"]).name if covered else None, "Downloads")
+
+    apart = watch_registry.find_overlap(unrelated, registry)
+    check("an unrelated same-named folder does not overlap",
+          (apart["covered_by"], apart["absorbs"]), (None, []))
+
+    check("unregister removes it", watch_registry.unregister(receipts, registry), True)
+    check("unregister is idempotent", watch_registry.unregister(receipts, registry), False)
+
+    # Absorbing a scope must carry its purposes, which are LLM-authored
+    # judgments a plain rebuild of the parent would silently discard.
+    parent_index, child_index = root / "p-index.json", root / "c-index.json"
+    parent_index.write_text(json.dumps({
+        "scope": str(downloads), "by_sha256": {}, "loose_files": [],
+        "folders": {"invoices": {"purpose": "Parent's own.", "member_count": 2}}}),
+        encoding="utf-8")
+    child_index.write_text(json.dumps({
+        "scope": str(receipts), "by_sha256": {}, "loose_files": [],
+        "folders": {"2024": {"purpose": "Receipts from 2024.", "member_count": 5}}}),
+        encoding="utf-8")
+
+    result = merge_scope(parent_index, downloads, child_index, receipts)
+    merged = json.loads(parent_index.read_text(encoding="utf-8"))["folders"]
+    check("child purposes are re-keyed under the parent", result["carried"], ["Receipts/2024"])
+    check("carried purpose survives intact",
+          merged["Receipts/2024"]["purpose"], "Receipts from 2024.")
+    check("the parent's own purposes are untouched",
+          merged["invoices"]["purpose"], "Parent's own.")
+
+
+def test_script_encoding_and_syntax() -> None:
+    """Every .ps1 must be pure ASCII, and every script must compile.
+
+    Windows PowerShell 5.1 decodes a .ps1 as the system ANSI codepage unless
+    the file carries a UTF-8 BOM. A single em dash therefore arrives as three
+    mojibake characters: harmless inside a comment, but inside a
+    double-quoted string it terminates the string early and the whole script
+    fails to parse. Keeping these files ASCII depends on neither the BOM nor
+    the machine's codepage.
+    """
+    section("script encoding and syntax")
+
+    repo = SCRIPTS
+    while not (repo / "tests").is_dir() and repo != repo.parent:
+        repo = repo.parent
+
+    ps_files = sorted(p for p in repo.rglob("*.ps1") if ".git" not in p.parts)
+    check("found the PowerShell files", len(ps_files) > 0, True)
+
+    non_ascii = {p.name: sorted({b for b in p.read_bytes() if b > 127})
+                 for p in ps_files if any(b > 127 for b in p.read_bytes())}
+    check("no .ps1 contains non-ASCII", non_ascii, {})
+
+    # Compiling each one catches anything the ASCII rule alone would not.
+    broken = {}
+    for path in ps_files:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "$e=$null;[void][System.Management.Automation.Language.Parser]::"
+             f"ParseFile('{path}',[ref]$null,[ref]$e);if($e){{$e[0].Message}}"],
+            capture_output=True, text=True)
+        if (result.stdout or "").strip():
+            broken[path.name] = result.stdout.strip()
+    check("every .ps1 parses", broken, {})
+
+    bad_py = {}
+    for path in sorted(p for p in repo.rglob("*.py") if "__pycache__" not in p.parts):
+        try:
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+        except SyntaxError as exc:
+            bad_py[path.name] = str(exc)
+    check("every .py compiles", bad_py, {})
+
+
 def test_tokenizer() -> None:
     section("tokenizer")
     check("kebab", tokenize("tax-return"), ["tax", "return"])
@@ -401,6 +518,8 @@ def main() -> int:
         root.mkdir()
         test_names()
         test_tokenizer()
+        test_script_encoding_and_syntax()
+        test_scope_identity_and_nesting(root)
         test_exclusions(root)
         test_junctions(root)
         test_executor(root)
