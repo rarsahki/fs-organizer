@@ -113,6 +113,41 @@ function Remove-Autostart {
     return $false
 }
 
+function Test-WatcherRunning {
+    <# Is a watcher process live for this scope right now?
+
+       Asked of the singleton mutex the watcher itself holds, rather than by
+       scanning process lists: the mutex is the watcher's own definition of
+       "an instance is already running for this scope", so the two can never
+       disagree. #>
+    param([string]$ScopeId)
+    try {
+        $mutex = [System.Threading.Mutex]::OpenExisting("Local\FsOrganizerWatcherSingleton-$ScopeId")
+        $mutex.Dispose()
+        return $true
+    } catch {
+        return $false   # not created = nothing running for this scope
+    }
+}
+
+function Show-RestartNotice {
+    <# A running watcher keeps executing the code it started with.
+
+       That matters more than it sounds. A headless run loads the INSTALLED
+       skill, so an old watcher dispatching into a newly updated skill has
+       the two disagreeing about things like how a scope's state is named -
+       and the session, finding state its own copy of the scripts could not
+       have produced, treats it as forged and refuses to touch anything. The
+       run is wasted and nothing is organized, with no obvious cause. #>
+    param([string]$Path)
+    Write-Host ""
+    Write-Host "  NOTE a watcher is already running for this folder."
+    Write-Host "       It keeps running the code it started with, so restart it to pick"
+    Write-Host "       up this version - log out and back in, or:"
+    Write-Host "         Get-Process powershell | Where-Object { `$_.CommandLine -like '*fs-organizer-watch.ps1*' } | Stop-Process"
+    Write-Host "         wscript.exe `"$Launcher`" `"$Path`""
+}
+
 $WatchDir = [System.IO.Path]::GetFullPath($WatchDir.TrimEnd('\', '/'))
 
 # ---------------------------------------------------------------- uninstall
@@ -178,6 +213,13 @@ if ($absorb.Count -gt 0) {
         [void](Remove-Autostart $childRoot)
         [void](Invoke-Fsorg @((Join-Path $ScriptsDir 'watch_registry.py'), 'unregister', '--root', $childRoot))
         Write-Host "    absorbed $childRoot"
+        # Deregistering does not stop a process. Until the absorbed watcher
+        # is stopped it keeps watching its folder, which is exactly the
+        # double dispatch this absorption exists to end.
+        if (Test-WatcherRunning $child.scope_id) {
+            Write-Host "      its watcher is still RUNNING - stop it, or it keeps dispatching:"
+            Write-Host "        log out and back in, or end the powershell process watching $childRoot"
+        }
     }
 }
 
@@ -206,12 +248,16 @@ if (-not (Test-Path $indexFile)) {
                    "skips dispatch. Ask Claude to 'organize $WatchDir' first.")
 }
 
+if (Test-WatcherRunning $scopeId) { Show-RestartNotice $WatchDir }
+
 Write-Host ""
 Write-Host "Watching  : $WatchDir"
 Write-Host "Starts    : at logon"
 Write-Host "Logs      : $(Join-Path $StateDir 'logs')"
 Write-Host ""
-Write-Host "Start it now without logging out:"
-Write-Host "  wscript.exe `"$Launcher`" `"$WatchDir`""
+if (-not (Test-WatcherRunning $scopeId)) {
+    Write-Host "Start it now without logging out:"
+    Write-Host "  wscript.exe `"$Launcher`" `"$WatchDir`""
+}
 Write-Host "Stop watching this folder:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -WatchDir `"$WatchDir`" -Uninstall"

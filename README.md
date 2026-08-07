@@ -159,6 +159,28 @@ override that search.
 Logs: `~/.fs-organizer/logs/watcher-<scope>.log`, plus `watch-resolve.log`
 for which version the launcher picked.
 
+## Updating
+
+```
+/plugin marketplace update
+/plugin update fs-organizer
+```
+
+**Restart the watcher afterwards** if you have one running — log out and back
+in, or end the `powershell` process watching the folder and run the launcher
+again. Setup says so when it detects one.
+
+This is worth doing rather than skipping. A running watcher keeps executing
+the code it started with, but the headless session it dispatches loads the
+*installed* skill. After an update those are different versions, and they can
+disagree about something structural — how a scope's state directory is named,
+say. The session then finds state its own copy of the scripts could not have
+produced, correctly treats it as forged, and refuses to touch anything. The
+run is spent and nothing is organized, with nothing obvious to point at.
+
+That is not hypothetical: it is exactly what a real dispatch did when a 0.2.0
+watcher dispatched into a still-installed 0.1.0 skill.
+
 ## Where state lives
 
 Everything is per-folder, under that folder's own state directory:
