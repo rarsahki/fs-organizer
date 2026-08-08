@@ -99,7 +99,8 @@ python scripts/session_log.py --scope <scope> --mode organize --step "1-3-contex
 ## Step 5 — Place & structure
 
 - **Reference:** the scope's purpose index at
-  `~/.fs-organizer/<scope-name>/index.json`, plus
+  the scope's index (ask `fsorg_common.scope_state_dir(<scope>)` for the
+  folder; never compose the path), plus
   `references/naming-convention.md`, "Folder naming".
 - **Input:** Step 4's classifications, and the index's `{folder: purpose}`
   map — read the index here; it is the judgment this step exists to make.
@@ -200,7 +201,9 @@ python scripts/session_log.py --scope <scope> --mode organize --step "9-report" 
     `lookup <index_path> --file FILE`, `rehash <index_path> --file FILE --scope SCOPE`.
 - **Input:** the post-Step-7 state of the scope; Step 5's purpose strings.
 - **Output:** the index, current with what's on disk. The index file is
-  always `~/.fs-organizer/<scope-name>/index.json`.
+  `scope_state_dir(<scope>) / "index.json"`. Never build that path by
+  hand: the folder is the scope's leaf name plus a digest of its full
+  path, so two folders sharing a leaf name do not share state.
 
 ### Step 9 — Report
 

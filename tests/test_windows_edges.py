@@ -349,6 +349,41 @@ def test_fingerprints(root: Path) -> None:
     bom16.write_bytes(b"\xff\xfe" + "Wide Title\r\n\r\nBody.\r\n".encode("utf-16-le"))
     check("decodes utf-16", extract_fingerprint(bom16)["title"], "Wide Title")
 
+    # "Install pypdf" is the wrong advice for a PDF that has no text layer.
+    # Scans are exactly that case - and scanned bills and receipts are the
+    # single most common thing people have piles of - so the two reasons a
+    # PDF yields nothing have to be reported differently. Recommending a
+    # package the user already has sends them to fix the wrong thing.
+    import content_fingerprint_extractor as cfe
+
+    scanned = root / "scanned.pdf"
+    scanned.write_bytes(
+        b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
+        b"trailer\n<< /Size 4 /Root 1 0 R >>\n%%EOF\n")
+
+    saved = sys.modules.get("pypdf", "absent")
+    try:
+        with_parser = extract_fingerprint(scanned)
+        check("a text-less PDF is reported as having no text layer",
+              with_parser.get("note"), cfe._NO_TEXT_NOTE)
+        hint = cfe._missing_parser_hint([with_parser]) or ""
+        check("and is NOT told to install pypdf", "pip install" in hint, False)
+        check("but is still reported", "no text layer" in hint, True)
+
+        sys.modules["pypdf"] = None      # now genuinely unavailable
+        without = extract_fingerprint(scanned)
+        check("a missing parser is reported differently",
+              without.get("note"), "pdf text extraction unavailable")
+        check("and DOES suggest the install",
+              "pip install pypdf" in (cfe._missing_parser_hint([without]) or ""), True)
+    finally:
+        if saved == "absent":
+            sys.modules.pop("pypdf", None)
+        else:
+            sys.modules["pypdf"] = saved
+
     # 0-byte files get no hash: sha256("") is a constant, so hashing them
     # would cluster every unrelated empty file as an exact duplicate.
     empty = root / "empty.txt"

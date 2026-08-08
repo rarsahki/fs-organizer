@@ -10,7 +10,7 @@
       "name": "fs-organizer",
       "source": "./",
       "description": "Windows-only. Organizes, renames, and de-duplicates files using content understanding plus deterministic scripts. Only byte-identical copies are ever deleted, and only to the Recycle Bin.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "productivity",
       "tags": [
         "files",

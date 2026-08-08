@@ -106,8 +106,8 @@ implementation.
 ## Storage — per-scope state
 
 All persistent state for a scope lives in one folder named after the
-scoped directory: `~/.fs-organizer/<scope-name>/` (e.g. the Downloads
-scope's state is `~/.fs-organizer/Downloads/`). It holds:
+scoped directory: `~/.fs-organizer/<scope-id>/` (e.g. the Downloads scope's
+state is `~/.fs-organizer/Downloads-24354063/`). It holds:
 
 - `index.json` — the scope's purpose index: a `{folder: purpose}` map,
   where a purpose is a 1–2 sentence description of what belongs in that
@@ -124,14 +124,23 @@ scope's state is `~/.fs-organizer/Downloads/`). It holds:
 A run for a scope never writes its state under another scope's folder or
 at the `.fs-organizer` top level.
 
+**Never build a state path by hand.** `<scope-id>` is the directory's leaf
+name followed by a short digest of its full path, so `D:\Scans\Receipts`
+keeps its state in `~/.fs-organizer/Receipts-4c11fd49/`. The leaf alone
+would not do: `C:\Users\me\Downloads\Receipts` and `D:\Scans\Receipts` are
+different folders, and naming state after the leaf gave them one shared
+index, one queue and one lock. Ask for the path instead of composing it —
+`fsorg_common.scope_state_dir(<scope>)` for the folder,
+`scope_id(<scope>)` for just the name. The watcher's PowerShell side has a
+matching `Get-ScopeId`; the two are verified to agree exactly, and a
+hand-built path would agree with neither.
+
 **Any scope, any machine.** A scope is just a directory — `Downloads` is
-only the common example, not a requirement. `<scope-name>` is that
-directory's own leaf name, so `D:\Scans\Receipts` keeps its state in
-`~/.fs-organizer/Receipts/`. Nothing in this skill hardcodes a user name,
-a drive, or an install location: resolve the state root from the current
-user's home directory, and resolve the skill's own scripts relative to
-this file. That is what lets the same skill run unchanged on any Windows
-system and under any account.
+only the common example, not a requirement. Nothing in this skill hardcodes
+a user name, a drive, or an install location: resolve the state root from
+the current user's home directory, and resolve the skill's own scripts
+relative to this file. That is what lets the same skill run unchanged on
+any Windows system and under any account.
 
 **Working files are not records.** The scripts pass data to each other
 through JSON files (`--from`/`--output`, the executor's plan file) because
@@ -151,7 +160,7 @@ them.
 
 ## Session log
 
-`~/.fs-organizer/<scope-name>/session-file-<YYYY-MM-DD>` — one file per
+`~/.fs-organizer/<scope-id>/session-file-<YYYY-MM-DD>` — one file per
 scope per date, appended to by every run that day, in both modes.
 
 Write entries with `scripts/session_log.py`, **chained onto the step's own

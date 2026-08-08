@@ -116,7 +116,16 @@ def _text_fingerprint(text: str) -> dict:
     }
 
 
-def _pdf_text(path: Path) -> str | None:
+# Why a parser produced no text. The distinction is not cosmetic: telling
+# someone to install a package they already have sends them to fix the wrong
+# thing, and a PDF with no text layer is the common case, not the exotic one
+# - a scanned bill or receipt is exactly that, and no package will read it.
+NO_PARSER = "no-parser"    # the optional package is not installed
+NO_TEXT = "no-text"        # the parser ran and the file has no text to give
+
+
+def _pdf_text(path: Path) -> tuple[str | None, str | None]:
+    """(text, reason). *reason* is set only when there is no text."""
     try:
         # pypdf pulls in `cryptography`, which warns on import about a
         # moved ARC4 class. It is a UserWarning subclass, so no category
@@ -125,7 +134,7 @@ def _pdf_text(path: Path) -> str | None:
             warnings.simplefilter("ignore")
             from pypdf import PdfReader  # optional dependency
     except ImportError:
-        return None
+        return None, NO_PARSER
     try:
         reader = PdfReader(str(path))
         chunks = []
@@ -133,9 +142,10 @@ def _pdf_text(path: Path) -> str | None:
             chunks.append(page.extract_text() or "")
             if sum(len(c) for c in chunks) > _READ_CAP:
                 break
-        return "\n".join(chunks)[:_READ_CAP]
+        text = "\n".join(chunks)[:_READ_CAP]
     except Exception:
-        return None
+        return None, NO_TEXT
+    return (text, None) if text.strip() else (None, NO_TEXT)
 
 
 def _docx_text(path: Path) -> str | None:
@@ -241,10 +251,12 @@ def extract_fingerprint(path: str | Path) -> dict:
         return {**base, "modality": "text", **_text_fingerprint(text)}
 
     if ext == ".pdf":
-        text = _pdf_text(p)
-        if text and text.strip():
+        text, reason = _pdf_text(p)
+        if text:
             return {**base, "modality": "text", **_text_fingerprint(text)}
-        return {**base, "modality": "binary", "note": "pdf text extraction unavailable"}
+        note = ("pdf text extraction unavailable" if reason == NO_PARSER
+                else "pdf has no text layer (scanned or image-only)")
+        return {**base, "modality": "binary", "note": note}
 
     if ext == ".docx":
         text = _docx_text(p)
@@ -287,24 +299,44 @@ _PARSER_FOR_NOTE = {
 }
 
 
+_NO_TEXT_NOTE = "pdf has no text layer (scanned or image-only)"
+
+
 def _missing_parser_hint(results: list[dict]) -> str | None:
-    """One line naming what could not be read, and what would fix it.
+    """One or two lines naming what could not be read, and what would fix it.
 
     Every optional parser has a metadata-only fallback, so a missing one
-    never fails a run — it just quietly produces a worse name. Saying so
-    is the difference between "this skill names PDFs badly" and "installing
-    one package makes it name them well".
+    never fails a run — it just quietly produces a worse name. Saying so is
+    the difference between "this skill names PDFs badly" and "installing one
+    package makes it name them well".
+
+    A file with no text layer is reported separately and WITHOUT an install
+    suggestion. Recommending pypdf to someone who already has it sends them
+    to fix the wrong thing, and scanned bills and receipts - the single most
+    common thing people have piles of - are precisely this case. No package
+    reads them; OCR would, and this skill does not do OCR.
     """
     counts: dict[str, int] = {}
+    no_text = 0
     for fp in results:
-        package = _PARSER_FOR_NOTE.get(fp.get("note", ""))
+        note = fp.get("note", "")
+        if note == _NO_TEXT_NOTE:
+            no_text += 1
+            continue
+        package = _PARSER_FOR_NOTE.get(note)
         if package:
             counts[package] = counts.get(package, 0) + 1
-    if not counts:
-        return None
-    parts = [f"{n} file(s) need {pkg}" for pkg, n in sorted(counts.items())]
-    return ("  note: named without reading content — " + "; ".join(parts)
-            + f". Install with: pip install {' '.join(sorted(counts))}")
+
+    lines = []
+    if counts:
+        parts = [f"{n} file(s) need {pkg}" for pkg, n in sorted(counts.items())]
+        lines.append("  note: named without reading content — " + "; ".join(parts)
+                     + f". Install with: pip install {' '.join(sorted(counts))}")
+    if no_text:
+        lines.append(f"  note: {no_text} PDF(s) have no text layer (scanned or "
+                     "image-only) and were named from their filename and folder. "
+                     "No package can read these; they need OCR.")
+    return "\n".join(lines) if lines else None
 
 
 def _files_from_context(context_path: str | Path) -> list[str]:

@@ -16,9 +16,10 @@ judgment steps' entries into the next chain.
 
 **Working files** (`<work>/…`) go in a temporary directory and are
 discarded when the run ends. The session log at
-`~/.fs-organizer/<scope-name>/session-file-<YYYY-MM-DD>` is the only
+`scope_state_dir(<scope>) / "session-file-<YYYY-MM-DD>"` is the only
 record — the same file Organize-mode runs append to, never a shared
-global location.
+global location. `session_log.py` resolves that path itself; pass it the
+scope and never compose the path.
 
 ---
 
@@ -27,8 +28,11 @@ global location.
 ### Step 1 — Read context (precondition check)
 
 In Watcher mode the context is the purpose index, not a directory scan.
-The index is always `~/.fs-organizer/<scope-name>/index.json` (e.g.
-`~/.fs-organizer/Downloads/index.json`).
+The index is `scope_state_dir(<scope>) / "index.json"` — for Downloads,
+`~/.fs-organizer/Downloads-24354063/index.json`. Ask
+`fsorg_common.scope_state_dir` for it rather than composing the path: the
+folder is the scope's leaf name plus a digest of its full path, so two
+folders sharing a leaf name do not share an index.
 
 - **Input:** the watched directory.
 - **Output:** confirmation that the index file exists — nothing more.
