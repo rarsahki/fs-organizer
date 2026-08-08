@@ -11,7 +11,7 @@ Applies a plan of filesystem operations with:
   SHFileOperationW is called through ctypes, with send2trash used first
   when it is installed. If neither route works the op fails and is
   reported rather than falling back to a permanent delete.
-- a journal written to ~/.fs-organizer/<scope-name>/journals/<timestamp>.json
+- a journal written to <scope-state-dir>/journals/<timestamp>.json
   recording every operation and its outcome (enables undo/resume/audit),
   stored under the scope's own state folder like every other per-scope
   artifact — never merged into one pile at the .fs-organizer top level
@@ -31,6 +31,10 @@ name) in one atomic os.rename — never split it into two ops.
 
 Usage as module:   from batch_executor import execute_plan
 Usage as CLI:      python batch_executor.py plan.json --scope <dir> [--dry-run]
+
+<scope-state-dir> is fsorg_common.scope_state_dir(<scope>): the scope's
+leaf name plus a digest of its full path, never the leaf alone - two
+folders sharing a leaf name must not share state. Never compose it.
 """
 from __future__ import annotations
 

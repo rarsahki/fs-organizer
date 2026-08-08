@@ -30,9 +30,9 @@ correctness backstop for edited-in-place files nobody's downloaded a
 duplicate of since is Step 8, which runs a full `build` (re-hashes
 everything) at the end of every Organize-mode run.
 
-Index format (~/.fs-organizer/<scope-name>/index.json by convention — one
+Index format (<scope-state-dir>/index.json by convention — one
 per scope, stored under that scope's own state folder, e.g.
-~/.fs-organizer/Downloads/index.json):
+~/.fs-organizer/Downloads-24354063/index.json):
 {
   "scope": "<scope root>",
   "updated_at": "<ISO 8601 UTC>",
@@ -91,6 +91,10 @@ Usage as CLI:
   python index_manager.py update index.json --file <path> --scope <dir> [--folder <name>]
   python index_manager.py set-purpose index.json --folder <name> --purpose "<text>"
   python index_manager.py rehash index.json --file <path> --scope <dir>
+
+<scope-state-dir> is fsorg_common.scope_state_dir(<scope>): the scope's
+leaf name plus a digest of its full path, never the leaf alone - two
+folders sharing a leaf name must not share state. Never compose it.
 """
 from __future__ import annotations
 

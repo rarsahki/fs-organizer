@@ -13,7 +13,7 @@ timestamp silently shifts the cutoff the closing usage report measures
 from, and asking the shell for the time was costing a round trip per
 entry.
 
-Log path: <state-root>/<scope-name>/session-file-<YYYY-MM-DD>, one file
+Log path: <scope-state-dir>/session-file-<YYYY-MM-DD>, one file
 per scope per date, appended to by every run that day, in both modes.
 
 Usage as module:   from session_log import append_entry
@@ -23,6 +23,10 @@ Usage as CLI:
       --input "<what it consumed>" --output "<what it produced>"
   python session_log.py --scope <dir> --mode organize --step run-start \
       --note "scope: ..., new_files: ..."
+
+<scope-state-dir> is fsorg_common.scope_state_dir(<scope>): the scope's
+leaf name plus a digest of its full path, never the leaf alone - two
+folders sharing a leaf name must not share state. Never compose it.
 """
 from __future__ import annotations
 
