@@ -187,7 +187,11 @@ forms of the name.
 
 ### Step 7 — Execute
 
-- **Script:** `batch_executor.py [--scope SCOPE] [--dry-run] plan_json`
+- **Script:** `batch_executor.py [--scope SCOPE] [--dry-run] [--prune-emptied] plan_json`
+  — `--prune-emptied` applies here too, though it rarely fires: an
+  arrival at the scope root empties nothing, and the scope root itself
+  is never a candidate. It matters when a file is filed out of a
+  subfolder that then holds nothing.
 - **Input:** the Step 5/6 decisions as a flat `plan.json` ops array, same
   format as Organize mode's Step 7.
 - **Output:** the executor's journal. Every op auto-executes — moves into

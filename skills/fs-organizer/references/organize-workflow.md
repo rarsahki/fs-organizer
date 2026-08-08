@@ -164,7 +164,12 @@ python scripts/session_log.py --scope <scope> --mode organize --step "6-name" --
 
 ### Step 7 — Execute
 
-- **Script:** `batch_executor.py [--scope SCOPE] [--dry-run] plan_json`
+- **Script:** `batch_executor.py [--scope SCOPE] [--dry-run] [--prune-emptied] plan_json`
+  — pass `--prune-emptied`: filing the last document out of a folder leaves
+  a husk behind, and this recycles the folders THIS plan emptied once the
+  moves have happened. A folder that was already empty before the run is
+  never touched; the user made it, and the run has no business tidying it
+  away.
 - **Input:** `target_plan.json` + `names.json`, merged into `plan.json` —
   a **flat JSON array** of ops, never a wrapped object:
   `{"op":"mkdir","path":...}`, `{"op":"rename"|"move","src":...,"dst":...}`,

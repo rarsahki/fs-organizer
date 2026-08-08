@@ -326,6 +326,86 @@ def test_delete_without_send2trash(root: Path) -> None:
     check("missing target is a no-op", journal["operations"][0]["status"], "already-applied")
 
 
+def test_emptied_dir_pruning(root: Path) -> None:
+    """Folders the run emptied are removed; folders it did not are not.
+
+    Filing the last document out of a folder leaves a husk, and a real
+    Downloads accumulates them. The distinction that matters is whose mess
+    it is: a folder the run emptied held a file a moment ago, while one that
+    was already empty is something the user made and never asked the skill
+    to touch.
+    """
+    section("emptied-folder pruning")
+
+    from batch_executor import emptied_dirs
+
+    scope = root / "prune-scope"
+    (scope / "archive" / "old").mkdir(parents=True, exist_ok=True)
+    (scope / "archive" / "contract.pdf").write_text("c", encoding="utf-8")
+    (scope / "archive" / "old" / "contract-2.pdf").write_text("c2", encoding="utf-8")
+    (scope / "keep").mkdir(exist_ok=True)
+    (scope / "keep" / "stays.txt").write_text("s", encoding="utf-8")
+    (scope / "keep" / "moved.txt").write_text("m", encoding="utf-8")
+    (scope / "already-empty").mkdir(exist_ok=True)
+    (scope / "docs").mkdir(exist_ok=True)
+
+    ops = [
+        {"op": "move", "src": str(scope / "archive" / "contract.pdf"),
+         "dst": str(scope / "docs" / "signed-contract.pdf")},
+        {"op": "delete", "path": str(scope / "archive" / "old" / "contract-2.pdf")},
+        {"op": "move", "src": str(scope / "keep" / "moved.txt"),
+         "dst": str(scope / "docs" / "moved-note.txt")},
+    ]
+    execute_plan(ops, journal_dir=root / "prune-journals", scope=scope)
+
+    husks = emptied_dirs(ops, scope)
+    names = [str(d.relative_to(scope)) for d in husks]
+    check("both emptied folders found", sorted(names), ["archive", os.path.join("archive", "old")])
+    # Removing the child is what empties the parent, so order is not cosmetic.
+    check("deepest first", names[0], os.path.join("archive", "old"))
+    check("a pre-existing empty folder is spared", "already-empty" in names, False)
+    check("a folder that still holds a file is spared", "keep" in names, False)
+    check("the scope root is never a candidate", str(scope) in [str(d) for d in husks], False)
+
+    execute_plan([{"op": "delete", "path": str(d)} for d in husks],
+                 journal_dir=root / "prune-journals", scope=scope)
+    check("husks are gone", (scope / "archive").exists(), False)
+    check("pre-existing empty folder survives", (scope / "already-empty").exists(), True)
+    check("the kept file is untouched", (scope / "keep" / "stays.txt").exists(), True)
+
+
+def test_html_fingerprint(root: Path) -> None:
+    """A saved page is named from its title, not from its markup."""
+    section("html fingerprinting")
+
+    page = root / "saved.html"
+    page.write_text(
+        "<html><head><title>How to configure OpenVPN on Windows</title>"
+        "<style>body{color:red}</style></head><body><h1>Configuring OpenVPN</h1>"
+        "<p>Step by step guide.</p><script>var x=1;</script></body></html>",
+        encoding="utf-8")
+    fp = extract_fingerprint(page)
+    check("title comes from <title>", fp["title"], "How to configure OpenVPN on Windows")
+    check("script and style are not body text", "var x=1" in fp["first_paragraph"], False)
+    check("visible text is", "Step by step guide." in fp["first_paragraph"], True)
+
+    entities = root / "entities.html"
+    entities.write_text("<html><head><title>Caf&eacute; &amp; Bar</title></head>"
+                        "<body><p>Espresso.</p></body></html>", encoding="utf-8")
+    check("entities are decoded", extract_fingerprint(entities)["title"], "Café & Bar")
+
+    # An unclosed <title> would otherwise collect the whole document.
+    broken = root / "broken.html"
+    broken.write_text("<html><title>Release Notes<body><p>Version 3.</p>", encoding="utf-8")
+    check("an unclosed title ends at <body>",
+          extract_fingerprint(broken)["title"], "Release Notes")
+
+    untitled = root / "untitled.html"
+    untitled.write_text("<html><body><h1>Just A Heading</h1></body></html>", encoding="utf-8")
+    check("a page with no <title> falls back to its text",
+          extract_fingerprint(untitled)["title"], "Just A Heading")
+
+
 def test_fingerprints(root: Path) -> None:
     section("fingerprints")
 
@@ -559,6 +639,8 @@ def main() -> int:
         test_junctions(root)
         test_executor(root)
         test_delete_without_send2trash(root)
+        test_emptied_dir_pruning(root)
+        test_html_fingerprint(root)
         test_fingerprints(root)
         test_index(root)
 

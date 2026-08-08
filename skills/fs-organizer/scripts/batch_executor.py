@@ -249,6 +249,45 @@ def _check_scope(op: dict, scope: Path | None) -> None:
             raise ScopeViolation(f"out of scope ({scope}): {raw}")
 
 
+def emptied_dirs(ops: list[dict], scope: Path) -> list[Path]:
+    """Folders this plan emptied, deepest first.
+
+    A run that files the last document out of a folder leaves a husk behind.
+    Only folders the run itself emptied qualify: each is the parent of
+    something the plan moved or deleted, so it demonstrably held a file
+    before the run and holds none after. A folder that was already empty
+    beforehand is left alone - the user made it, the run did not empty it,
+    and deleting it would be the skill tidying away something it was never
+    asked to touch.
+
+    Deepest first, because removing a child is what empties its parent:
+    archive/old goes before archive, and archive then qualifies too.
+    """
+    scope = Path(scope).resolve()
+    candidates: set[Path] = set()
+    for op in ops:
+        source = op.get("src") or (op.get("path") if op.get("op") == "delete" else None)
+        if not source:
+            continue
+        parent = Path(source).resolve().parent
+        while parent != scope and _in_scope(parent, scope):
+            candidates.add(parent)
+            parent = parent.parent
+
+    ordered = sorted(candidates, key=lambda p: len(p.parts), reverse=True)
+    marked: set[Path] = set()
+    for d in ordered:
+        try:
+            contents = list(d.iterdir())
+        except OSError:
+            continue
+        # Vacuously true for an empty folder, and true for one whose only
+        # remaining entries are themselves already queued for removal.
+        if all(c in marked for c in contents):
+            marked.add(d)
+    return [d for d in ordered if d in marked]
+
+
 def execute_plan(ops: list[dict], dry_run: bool = False,
                  journal_dir: Path | None = None,
                  scope: str | Path | None = None) -> dict:
@@ -343,9 +382,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scope", default=None,
                     help="directory the approval covered; ops outside it are rejected")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--prune-emptied", action="store_true",
+                    help="after applying, recycle folders this plan emptied "
+                         "(never ones that were already empty)")
     args = ap.parse_args(argv)
     ops = json.loads(Path(args.plan_json).read_text(encoding="utf-8-sig"))
     result = execute_plan(ops, dry_run=args.dry_run, scope=args.scope)
+
+    if args.prune_emptied and args.scope:
+        # A second pass, because emptiness can only be judged once the moves
+        # have happened. Routed through the same executor, so these deletions
+        # are scope-checked, recycled and journalled like any other.
+        husks = emptied_dirs(ops, Path(args.scope))
+        if husks:
+            prune = execute_plan([{"op": "delete", "path": str(d)} for d in husks],
+                                 dry_run=args.dry_run, scope=args.scope)
+            result["pruned_empty_dirs"] = [str(d) for d in husks]
+            result["operations"].extend(prune["operations"])
+            result["applied"] += prune["applied"]
+            result["failed"] += prune["failed"]
+
     print(json.dumps(result, indent=2))
     return 0 if result["failed"] == 0 else 1
 

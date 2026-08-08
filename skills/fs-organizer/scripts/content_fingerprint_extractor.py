@@ -24,6 +24,7 @@ import argparse
 import json
 import logging
 import warnings
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
 
@@ -91,6 +92,84 @@ def _head_text(path: Path, cap: int = _READ_CAP) -> str | None:
     # bounded read can slice a UTF-16 pair in half, which errors="replace"
     # absorbs rather than raising.
     return raw.decode(encoding, errors="replace").lstrip("﻿")[:cap]
+
+
+class _HtmlText(HTMLParser):
+    """Pull a page's title and visible text out of its markup.
+
+    Without this, an .html file was fingerprinted as raw source, so a saved
+    page's title came back as "<html><head><title>How to configure OpenVP"
+    - the real title sitting right there, unusable. Saved pages are a case
+    this skill handles deliberately, renaming the html and its asset folder
+    as a pair, so naming them from markup rather than content undercuts the
+    one part of that it can actually judge.
+
+    stdlib only: an HTML parser is not worth a dependency here, and the
+    tolerant one in the standard library is the right shape for real-world
+    saved pages, which are rarely well-formed.
+    """
+
+    _SKIP = {"script", "style", "noscript", "head"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title_parts: list[str] = []
+        self.body_parts: list[str] = []
+        self._stack: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "body":
+            # A saved page with an unclosed <title> would otherwise collect
+            # the entire document as its title. Reaching <body> ends any
+            # title regardless of what the markup claims.
+            self._stack = [t for t in self._stack if t != "title"]
+        self._stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag in self._stack:
+            while self._stack and self._stack.pop() != tag:
+                pass
+
+    def handle_data(self, data):
+        if "title" in self._stack:
+            self.title_parts.append(data)
+        elif not self._SKIP.intersection(self._stack):
+            stripped = data.strip()
+            if stripped:
+                self.body_parts.append(stripped)
+
+    @property
+    def title(self) -> str:
+        return " ".join("".join(self.title_parts).split())
+
+    @property
+    def body(self) -> str:
+        return " ".join(" ".join(self.body_parts).split())
+
+
+def _html_fingerprint(markup: str) -> dict:
+    """title/first_paragraph/word_count for an HTML document."""
+    parser = _HtmlText()
+    try:
+        parser.feed(markup)
+        parser.close()
+    except Exception:
+        # Malformed beyond what the tolerant parser tolerates: fall back to
+        # treating it as text rather than losing the file's fingerprint.
+        return _text_fingerprint(markup)
+
+    title = parser.title
+    body = parser.body
+    if not title and not body:
+        return _text_fingerprint(markup)
+    # A page with no <title> still has visible text; lead with that.
+    if not title:
+        title = body[:200]
+    return {
+        "title": title[:200],
+        "first_paragraph": body[:500],
+        "word_count": len(body.split()),
+    }
 
 
 def _text_fingerprint(text: str) -> dict:
@@ -248,6 +327,8 @@ def extract_fingerprint(path: str | Path) -> dict:
         text = _head_text(p)
         if text is None:
             return {**base, "modality": "unreadable"}
+        if ext in (".html", ".htm"):
+            return {**base, "modality": "text", **_html_fingerprint(text)}
         return {**base, "modality": "text", **_text_fingerprint(text)}
 
     if ext == ".pdf":
